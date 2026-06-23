@@ -1,159 +1,314 @@
+# DeFi Telegram Bot — Project Interview Guide (for **Omnissa** SDE Intern)
 
-## SLIDE 1 — Title slide  *(~20 sec)*
+> **One-line pitch:** *A Telegram bot that gives every user a crypto wallet and lets them buy/sell 7 custom ERC-20 tokens with test-net Ethereum. It fetches live prices, signs on-chain transactions through Solidity smart contracts I wrote and tested with Foundry, and stores each user's private key **encrypted (AES)** in MongoDB.*
 
-> "Good [morning / afternoon]. My name is [Your Name], and this is my Research Internship for the 6th semester. The title of my work is 'Effects of Quantum Computers on Bitcoin' — specifically, I measured what would happen to the Bitcoin network if it had to switch to a new kind of digital signature. Let me start with what Bitcoin actually is, because the rest of the talk will make more sense once we have that picture."
+> ⭐ **This is your strongest project — lead with it.** It hits the exact themes Omnissa cares about: **cryptography & key management, secure client–server communication, distributed/external systems, concurrency, and a contract (interface) between components.** You can go deep, so do.
 
----
-
-## SLIDE 2 — What is Bitcoin? (60 second background) 
-
-> "In one sentence: Bitcoin is digital money that runs on a public ledger that anyone in the world can verify. There is no bank — instead, every payment is broadcast to a network of computers, which agree on a shared list of who-paid-whom. That shared list is the 'blockchain'. Every payment, or 'transaction', is signed with the sender's secret digital key — a kind of mathematical signature that proves you really own the Bitcoin you're spending. Today, Bitcoin holds more than one trillion U.S. dollars of value, so the security of those signatures matters a lot."
-
----
-
-## SLIDE 3 — The looming threat  
-
-> "Here is the problem I studied. The signatures Bitcoin uses today are called ECDSA. They are secure against ordinary computers — but they are not secure against a future technology called a quantum computer. A quantum computer is a fundamentally different kind of machine that can solve certain math problems exponentially faster. The exact math problem ECDSA depends on is one of those problems. So when a sufficiently powerful quantum computer exists — most experts estimate sometime between 2030 and 2045 — anyone using it could forge Bitcoin signatures and steal funds."
+This guide has 3 parts:
+1. **Deep explanation** of the whole system, framed for an **Omnissa** interviewer.
+2. **20 interview Q&A** — the questions most likely to come from this project.
+3. **A 1-page revision cheat sheet** for the night before.
 
 ---
 
-## SLIDE 4 — The fix and the catch  *(~40 sec)*
+## 0. First — who is Omnissa, and why is *this* the project to lead with?
 
-> "The good news is that the U.S. National Institute of Standards and Technology — NIST — recently approved three new signature schemes that quantum computers cannot break. They are called ML-DSA, FN-DSA, and SLH-DSA. The bad news, and this is where my research comes in, is that all three are much bigger than today's signature. The current signature is 71 bytes. The new ones are between 666 and almost 8,000 bytes. So if Bitcoin switches, every transaction gets bigger. The question is: by how much, and what knock-on effects does that have?"
+**Omnissa** is VMware's former **End-User Computing** business (Workspace ONE, Horizon VDI, App Volumes) — enterprise software for **securely delivering apps/desktops to any device.** So they hire for **security, identity, networking, distributed systems, OS/concurrency, and clean OOP design** (they're a **Java/Spring** shop).
 
----
+| What Omnissa values | Where THIS project proves it |
+| --- | --- |
+| **Security & key management** (their core business) | You **generate, encrypt-at-rest (AES), and custody private keys** — and can discuss the trade-offs honestly. This is the single best part. |
+| **Networking & protocols** | **Telegram long-polling**, **JSON-RPC** to an Ethereum node (Alchemy), **REST** to CoinGecko, **TLS** everywhere. You can compare **polling vs webhooks**. |
+| **Concurrency / OS** | Node **event loop**, `async/await`, and **`Promise.all`** to fetch 8 balances in **parallel**. An in-memory **state machine** (`userBuyState`) handles multi-step conversations. |
+| **Distributed systems / failure** | Money flows across **3 external systems** (Telegram, blockchain, price API). You can talk **atomicity, retries, idempotency, single points of failure.** |
+| **Interfaces / OOP** | Solidity **`interface ITOKEN`**, a **master contract** owning child token contracts, the **Ownable** access-control pattern — clean abstraction boundaries. |
+| **Testing** | **Foundry** unit tests + a **10,000-run fuzz** profile. Real tests — lean on them. |
+| **DSA + complexity** | Price math, state map (O(1) lookups), parallel vs sequential I/O. |
 
-## SLIDE 5 — Our research question  *(~25 sec)*
-
-> "So the research question I set out to answer is simple. If Bitcoin migrated tomorrow to one of these three quantum-safe signatures, what would actually happen — to transaction sizes, to network throughput, and to fees? Prior work has discussed this question qualitatively. My contribution is to measure it empirically on real, recent Bitcoin data."
----
-
-## SLIDE 6 — What I did (methodology in 30 seconds)  *(~50 sec)*
-
-> "Here is what I did. I sampled ten real Bitcoin blocks evenly across April 2026 — that gives me transactions from many different days, not just one busy moment. I downloaded all the transactions in those blocks using two free public APIs, mempool.space and Blockstream Esplora. That gave me 24,679 real transactions to analyse. For each transaction, I wrote Python code to count the number of signatures it carried, identify the signature type, and then compute what the transaction's new size would be under each of the three quantum-safe signature schemes. The full analysis is in a Jupyter notebook, which is reproducible — anyone can run it and get the same numbers."
-
----
-
-## SLIDE 7 — Finding 1: Transactions balloon in size  *(~40 sec)*
-
-> "Here's the first finding. On average, transactions would become 8 times bigger under the smallest quantum-safe scheme, FN-DSA. Under the middle scheme, ML-DSA, they would become 19 times bigger. And under the largest, SLH-DSA, they would become 41 times bigger. To make this concrete: a small Bitcoin payment today is about 250 bytes — roughly the size of a short email. After migration, the same payment would be between 2 and 10 kilobytes — closer to the size of a small image."
+**Golden rule:** This is **money software** running across **untrusted networks**. Whenever you explain something, add a line about **security, correctness, or what happens on failure.** That's precisely the mindset Omnissa hires for.
 
 ---
 
-## SLIDE 8 — Finding 2: Blocks burst at the seams  *(~50 sec)*
+## 1. The pitch (memorize)
 
-> "Now here's why that matters. Bitcoin has a hard rule: each block can only carry so many transactions. Today, blocks are about 69% full on average. But if every transaction suddenly becomes 8 to 40 times bigger, the same transactions don't fit anymore. Look at this chart — the dotted red line is the block-capacity limit. Today, all blocks stay safely below it. Under the smallest quantum-safe scheme, every block bursts to 4 times capacity. Under the largest, 19 times capacity. This isn't just a number — it means the rules of Bitcoin would either have to change, or the network would have to throw away most transactions."
+**30-second version:**
+> "It's a Telegram bot for trading crypto on a testnet. When you `/start`, the bot **generates an Ethereum wallet** for you, encrypts the private key, and stores it in MongoDB. Through an inline-button menu you can **buy** tokens (you send test ETH, a smart contract mints you tokens at the live market rate), **sell** them (the contract burns your tokens and sends ETH back), **check balances**, get your **public key**, or **eject** (export + delete) your private key. I wrote 7 ERC-20 token contracts plus a **master contract** in Solidity and tested them with Foundry."
 
----
-
-## SLIDE 9 — Finding 3: The network slows down dramatically  *(~40 sec)*
-
-> "Since fewer transactions fit per block, the network processes fewer transactions per second. Today Bitcoin handles about 4 transactions per second. Under the best quantum-safe scheme, FN-DSA, it would drop to 1.15 per second — three and a half times slower. Under SLH-DSA it would drop to one transaction every four seconds — 17 times slower. To give a sense of scale: a payment that confirms in 10 minutes today could take an hour or more after migration, simply because so many transactions would be waiting in line."
+**2-minute version:** add —
+> "The bot server is **TypeScript on Node** using `node-telegram-bot-api` in long-polling mode, talking to the Ethereum node via **ethers.js** over **JSON-RPC** (Alchemy), and to **CoinGecko's REST API** for live prices. The architecture has a clean trust boundary: each token contract's **ownership is transferred to the master contract**, so only the master can mint/burn, and only my server's owner key can call the master. The trickiest part is the **buy flow** — it's a two-step money operation (user pays ETH, then owner mints tokens), which raises real atomicity questions I can talk about."
 
 ---
 
-## SLIDE 10 — Finding 4: Some transactions become impossible  *(~30 sec)*
+## 2. Architecture (draw this — it impresses)
 
-> "There's a deeper problem too. Bigger transactions mean bigger fees, because in Bitcoin you pay roughly proportional to the bytes you use. For small payments — sending five dollars to a friend, for example — the fee could become bigger than the payment itself. I counted these 'uneconomic' transactions under each scheme. Under the worst scheme, about one in twenty currently-valid Bitcoin transactions would simply stop making sense to send."
+```
+   ┌────────────┐   long-polling (HTTPS)   ┌──────────────────────────────┐
+   │  Telegram   │ ◄──────────────────────► │   BOT SERVER (Node + TS)     │
+   │   user      │   getUpdates / sendMsg   │  • node-telegram-bot-api     │
+   └────────────┘                           │  • userBuyState (state m/c)  │
+                                            │  • ethers.js (signer)        │
+                                            └───┬───────────┬───────────┬──┘
+                                                │           │           │
+                              JSON-RPC (Alchemy)│   REST    │  Mongoose │
+                                                │ (prices)  │           │
+                                   ┌────────────▼──┐  ┌─────▼─────┐ ┌──▼──────────┐
+                                   │ Ethereum       │  │ CoinGecko │ │  MongoDB    │
+                                   │ (Sepolia test) │  │   API     │ │ {userId,    │
+                                   │                │  └───────────┘ │ encPrivKey, │
+                                   │ ┌────────────┐ │                │ publicKey}  │
+                                   │ │ Master     │ │                └─────────────┘
+                                   │ │ Tokens_To_ │ │
+                                   │ │ Server     │ │  owns ──► [USDC][USDT][BNB]
+                                   │ │ (Ownable)  │ │           [WBTC][SHY][PEPE][SHIB]
+                                   │ └────────────┘ │           (7 ERC-20 contracts)
+                                   └────────────────┘
+```
 
----
-
-## SLIDE 11 — What it all means  *(~50 sec)*
-
-> "Putting it together, three conclusions. First: none of the three standardized quantum-safe schemes is a drop-in replacement for what Bitcoin uses today. All three would either break Bitcoin's block-size rule or cripple its speed. Second: of the three, FN-DSA is the least bad — but even it would slow the network by three to four times. Third: a real migration will require either raising Bitcoin's block-size limit, which is extremely controversial in the community, or moving most everyday payments to a layer above Bitcoin, similar to how we use chequing accounts above a bank's main ledger. Either way, the conversation needs to start now, because designing, testing, and deploying such a change in Bitcoin takes years."
-
----
-
-## SLIDE 12 — Thank you & questions  *(~10 sec)*
-
-> "Thank you. I'm happy to answer any questions."
-
----
-
-# Q&A Bank: Questions evaluators might ask, with simple answers
-
-Each question is followed by a short, confident answer. Memorise the structure, not the exact words.
-
-### Q1: "What is a Bitcoin, in simple terms?"
-
-> "A Bitcoin is a digital token that exists only on a worldwide public ledger. Instead of a bank tracking who owns what, every computer in the Bitcoin network holds a copy of the ledger, and they agree on its content using cryptography. When I 'send' you a Bitcoin, what really happens is that everyone updates their copy of the ledger to record the transfer. It's like a public spreadsheet that no single person controls."
-
-### Q2: "What exactly is a quantum computer?"
-
-> "A quantum computer is a different kind of computing machine that uses the laws of quantum physics to perform certain calculations exponentially faster than today's computers. It is not faster at everything — only at a specific list of math problems. Unfortunately, one of those problems is the math that secures Bitcoin signatures. Current quantum computers are too small to threaten Bitcoin, but they are improving steadily."
-
-### Q3: "How did you actually run the experiment?"
-
-> "I wrote a Python program in a Jupyter notebook. It connects to two free public Bitcoin APIs and downloads real transaction data from ten blocks in April 2026. Then for each transaction, the program counts the signatures and calculates what the transaction's size would be if those signatures were replaced with quantum-safe ones. I have the notebook with me; I can demonstrate it live if you would like to see."
-
-### Q4: "Why did you choose April 2026 specifically?"
-
-> "Two reasons. First, it's a complete calendar month, so the sample isn't biased toward a particular week. Second, it's recent but already historical — which means anyone re-running my notebook later will get the same numbers, making the result reproducible."
-
-### Q5: "Why did you sample only 10 blocks? Isn't that too few?"
-
-> "Ten blocks may sound small, but each block contains thousands of transactions, so I have 24,679 real transactions in my sample. The 10 blocks are spread evenly across April, which captures variation across days and conditions. Sampling more blocks would not change the conclusion — the findings are sharp and consistent across all 10. I do mention this in the limitations section of the paper as something a future study could expand."
-
-### Q6: "What is the novelty of your work?"
-
-> "Earlier work on this topic was theoretical — people knew the new signatures were bigger, but nobody had measured the impact on the live Bitcoin network using the current rules. My contribution is the actual measurement. The specific numbers in my results — the 8.3× inflation for FN-DSA, the 400% block-fill, the 5% uneconomic transactions — those are sentences that did not exist anywhere before this paper."
-
-### Q7: "Could you not have used simulated data instead?"
-
-> "I could have, but it would not have been credible. Real Bitcoin transactions have messy patterns — multi-input consolidations from exchanges, mixed script types, dust outputs from small payments — that no synthetic generator would replicate. By using real on-chain data, I capture the actual distribution of transaction complexity, which directly affects the inflation numbers."
-
-### Q8: "What if a new, smaller quantum-safe signature is invented?"
-
-> "That would change my conclusions. My paper is explicitly about the three schemes that NIST standardized in 2024 — these are the only ones a responsible Bitcoin upgrade would currently consider. If, say, in 2030 NIST standardizes a new scheme half the size of FN-DSA, the analysis should be re-run. That's the value of having a reproducible notebook: the same code answers the new question."
-
-### Q9: "What is the meaning of TPS?"
-
-> "TPS stands for transactions per second — the rate at which a payment network can confirm transactions. Bitcoin's current TPS of about 4 is famously low compared to, say, Visa's 1,700. My research shows that quantum-safe signatures would push Bitcoin's TPS even lower — between 0.25 and 1.15."
-
-### Q10: "What is a 'block' in Bitcoin?"
-
-> "A block is simply a bundle of transactions that get confirmed together. Roughly every 10 minutes, the Bitcoin network agrees on a new block of pending transactions and adds it to the ledger. Each block can only carry so much data, which is why the question of transaction size matters so much — bigger transactions mean fewer fit per block."
-
-### Q11: "You mention 'witness discount'. What does that mean?"
-
-> "It's a technical rule introduced in Bitcoin in 2017. Signature data is given a 75% discount compared to other transaction bytes when measuring block capacity. The rule was designed to encourage upgrading to newer transaction types that store signatures in a separate section. The witness discount actually helps quantum-safe migration — without it, my inflation numbers would be 3 to 4 times worse."
-
-### Q12: "Why are there three different quantum-safe schemes, not just one?"
-
-> "Because they make different trade-offs. ML-DSA is balanced. FN-DSA is the smallest but uses more complex math. SLH-DSA is the most cryptographically conservative — it relies only on hash functions, which are extremely well-studied — but it is the largest. NIST standardized all three so that different applications can pick the trade-off that suits them. Bitcoin, where size matters enormously, would clearly pick FN-DSA based on my numbers."
-
-### Q13: "What is the practical implication of your work?"
-
-> "It tells the Bitcoin community two things. One: do not assume the quantum-safe migration will be smooth — it will require either changing Bitcoin's block-size rule or moving most users to a layer-2 system. Two: of the three available options, FN-DSA is the only one even close to feasible, so design effort should focus on that scheme rather than ML-DSA, which is currently the more popular default in other systems."
-
-### Q14: "Did you develop a new algorithm?"
-
-> "Not a new cryptographic algorithm — those are deep multi-year research efforts. What I developed is a measurement methodology and a reproducible analysis pipeline. The contribution is the empirical findings produced by that pipeline. My supervisor's brief allowed either a new algorithm or analytical work on benchmark data; this paper falls in the second category."
-
-### Q15: "How long did this work take you?"
-
-> "About six weeks. The first two weeks were learning Bitcoin's transaction structure and the post-quantum signature standards. The next two were writing and debugging the data-collection notebook. The final two were the analysis, figures, and paper write-up."
-
-(If you didn't actually spend 6 weeks, adapt this answer to your real timeline.)
-
-### Q16: "Can you show me a transaction in your data?"
-
-> "Yes — if you'd like, I can open the notebook and show you. Each transaction has a unique 64-character ID, and I can pull any one from the dataset and walk through its inputs, signatures, and projected size under each scheme."
-
-(If you have a laptop with the notebook ready, **practice this** so it goes smoothly.)
-
-### Q17: "What if the evaluator just asks 'Explain your paper in 30 seconds'?"
-
-> "Bitcoin signatures will be broken by quantum computers. NIST has approved three replacement signatures. All three are much bigger than today's. I measured what happens if Bitcoin uses them — on 24,679 real April 2026 transactions. The result: all three would either break Bitcoin's block-size rule or slow the network by 4 to 17 times. The least bad option is FN-DSA. A real migration will need block-size changes or a shift to layer-2 systems."
-
-(Memorise this. It's the elevator pitch.)
+**Mental model:** an **event-driven gateway** (the bot) that orchestrates **three external systems** — a **blockchain** (state + money), a **price oracle** (CoinGecko), and a **database** (key custody). Being able to say "orchestration across external systems with a trust boundary" is exactly the systems vocabulary Omnissa wants.
 
 ---
 
-# Final tips
+## 3. Tech stack & *why* (justify every choice)
 
-- **Speak slowly.** Most people, when nervous, double their speaking speed. Force yourself to slow down. Six minutes of slow, clear speech beats four minutes of rapid-fire.
-- **Use the figures.** When you talk about a finding, point at the chart on the slide. Don't just read the number.
-- **Pause for effect.** After a big number like "one trillion dollars" or "5.1%", pause one full second before continuing.
-- **If you don't know an answer, say so honestly.** Try: "That's a great question — I didn't measure that directly, but my best guess based on the data would be..." That is far better than bluffing.
-- **Have the notebook open and ready** in case anyone asks for a demo.
+| Layer | Tech | Why (say this) |
+| --- | --- | --- |
+| Bot | `node-telegram-bot-api` (**polling**) | Telegram is the UI — no need to build a frontend; polling is simplest to run without a public HTTPS endpoint. |
+| Language | **TypeScript** | **Static types** catch bugs at compile time — essential when bugs mean lost funds. Closest cousin to Java (interfaces, generics, OOP). |
+| Blockchain SDK | **ethers.js v6** | Clean API for wallets, signing, JSON-RPC providers, and contract calls. |
+| Node access | **Alchemy** (JSON-RPC) | Managed Ethereum node so I don't run my own; speaks standard JSON-RPC. |
+| Prices | **CoinGecko REST API** | Free live price feed (token → ETH). Acts as my price oracle. |
+| Contracts | **Solidity + OpenZeppelin** | Battle-tested `ERC20` + `Ownable` base classes — don't roll your own token/access-control. |
+| Testing | **Foundry (forge)** | Fast Solidity tests in Solidity; supports **fuzzing** (10k runs) and cheatcodes (`deal`, `prank`). |
+| DB | **MongoDB + Mongoose** | Simple key-value-ish store: `userId → {encryptedPrivateKey, publicKey}`. |
+| Crypto | Node **`crypto`** (AES, `createCipheriv`) | Symmetric encryption of private keys at rest. |
+| API/health | **Express** | Tiny HTTP server (health check / keep-alive on port 3000). |
+
+---
+
+## 4. End-to-end flows (this is where you win — know these cold)
+
+### 4.1 `/start` → wallet creation — [BOT-Server/src/createKeypair.ts](BOT-Server/src/createKeypair.ts)
+1. If the user already exists (by `chatId`), return their public key (idempotent — `/start` twice is safe).
+2. Else `ethers.Wallet.createRandom()` generates a fresh keypair.
+3. **Encrypt the private key** with AES (`encrypt()`), store `{userId, encryptedPrivateKey, publicKey}` in MongoDB.
+4. Return the **public key** to the user.
+
+> 🔑 **Key idea to say:** "The public key is the user's address; the private key is the secret that authorizes spending. I never store the private key in plaintext — it's **encrypted at rest**."
+
+### 4.2 Encryption / decryption — [BOT-Server/Utils/encrypt.ts](BOT-Server/Utils/encrypt.ts), [decrypt.ts](BOT-Server/Utils/decrypt.ts)
+- Symmetric **AES** via `crypto.createCipheriv(ALGORITHM, key, iv)` — key and IV are hex strings from env vars.
+- Encrypt: utf8 → hex; Decrypt reverses it.
+
+> ⚠️ **Two honest weaknesses (raise them — Omnissa is a security company):**
+> 1. **The IV is fixed/reused** for every user (it comes from one env var). With AES-CBC, **reusing an IV leaks information** (identical plaintexts → identical ciphertext) and is a textbook crypto mistake. Fix: a **random IV per encryption**, stored alongside the ciphertext.
+> 2. **It's symmetric**, so whoever holds the env key can decrypt *every* user's key — a **single point of compromise**. Better: a **KMS/HSM**, envelope encryption, or non-custodial design (never hold user keys at all).
+
+### 4.3 Buy flow (the crown jewel) — [BOT-Server/src/getToken.ts](BOT-Server/src/getToken.ts)
+1. User picks **Buy** → bot checks the user's **ETH balance** via `provider.getBalance`. If 0, it sends the **Sepolia faucet** link and the user's address. *(Can't transact without gas — good "you need gas for any state change" point.)*
+2. Bot shows **live prices** for all 7 tokens (CoinGecko), then sets `userBuyState[chatId] = 'USDC_buy'` and uses **`force_reply`** to ask "how much ETH?".
+3. On the reply, input is validated with a **regex** (`/^[0-9]*\.?[0-9]+$/`).
+4. `getTokens()` computes: `tokensToMint = (1 / priceTokenInEth) * ethAmount`.
+5. **Decrypt** the user's private key → build the user's wallet → check they have enough ETH.
+6. **Step A:** the user's wallet **sends ETH** to the owner/contract address.
+7. **Step B:** the **owner's wallet** calls `contract.GetToken(userAddr, tokensToMint, token)` which **mints** the tokens to the user (payable).
+8. Reply with the **transaction hash**.
+
+> ⚠️ **Atomicity = your best systems talking point:** Steps A and B are **two separate transactions**. If A succeeds (user pays ETH) but B fails (mint reverts), the **user is charged but gets no tokens.** This is a **distributed-transaction / two-phase-commit** problem. Fixes: do the payment **inside** the contract call (`GetToken` is already `payable` — send the ETH *with* the mint call so it's one atomic on-chain transaction), or add **idempotent retries / refund-on-failure**.
+
+### 4.4 Sell flow — [BOT-Server/src/burnToken.ts](BOT-Server/src/burnToken.ts)
+1. Read the user's token balance from the contract (`GetBalances`).
+2. If they have enough, compute `ethToReturn = price * amount`.
+3. Owner calls `contract.BurnToken(user, tokenAmount, ethAmount, token)` → contract **burns** the tokens and **transfers ETH** back to the user.
+4. Reply with the tx hash.
+
+### 4.5 Balances — [BOT-Server/src/getUserBalance.ts](BOT-Server/src/getUserBalance.ts)
+- Uses **`Promise.all`** to fire **8 reads in parallel** (7 token balances + native ETH) instead of awaiting them one-by-one.
+
+> 💡 **Concurrency talking point:** "Sequential `await`s would take the **sum** of 8 round-trips; `Promise.all` overlaps the I/O so it takes roughly the **max** of one. On a single-threaded event loop, that's the right way to parallelize I/O-bound work." This is a *fantastic* OS/concurrency answer.
+
+### 4.6 Eject (export + delete key) — in [BOT-Server/index.ts](BOT-Server/index.ts)
+- Shows a Yes/No confirmation → on Yes: **decrypt** the private key, **delete** the user from MongoDB, and **send the private key in chat**.
+
+> ⚠️ Sending a plaintext private key over a chat message is risky (it lives in Telegram's history/servers). Fine for a testnet demo; mention you'd warn the user and never do this with real funds.
+
+### 4.7 The conversational state machine — `userBuyState` in [BOT-Server/index.ts](BOT-Server/index.ts)
+- A bot is **stateless per message**, but buying needs two steps (pick token → enter amount). `userBuyState[chatId] = 'USDC_buy'` remembers "this user is mid-buy"; the next text message is interpreted as the amount, then the state is cleared.
+
+> ⚠️ **Scale weakness:** it's an **in-memory object**, so (a) state is **lost on restart** and (b) it **breaks if you run multiple bot instances** (a user's two messages could hit different servers). Fix: store conversation state in **Redis/MongoDB** keyed by `chatId` → makes the server **stateless and horizontally scalable**. This is a great distributed-systems answer.
+
+---
+
+## 5. The smart contracts (know the design + the *why*)
+
+### 5.1 The token contracts — [Smart-Contracts/Tokens/USDC.sol](Smart-Contracts/Tokens/USDC.sol) (×7)
+- Each extends OpenZeppelin **`ERC20`** + **`Ownable`**, with `mint`/`burn` guarded by **`onlyOwner`**.
+
+### 5.2 The master contract — [Smart-Contracts/src/Tokens_To_Server.sol](Smart-Contracts/src/Tokens_To_Server.sol) ⭐
+- Holds `mapping(string => address) Tokens` (name → token contract) and tracks `ETH_BALANCES` + `TotalEth`.
+- `AddToken`, `GetBalances`, `GetToken` (mint + accept ETH), `BurnToken` (burn + return ETH) — all `onlyOwner`.
+- Calls tokens through an **`interface ITOKEN`** (mint/burn/balanceOf).
+
+> 🔑 **The key design move:** after deploying each token, you **transfer its ownership to the master contract** (you can see it in the test: `usdc.transferOwnership(address(c))`). So:
+> - Only the **master** can mint/burn any token (single choke point for policy).
+> - Only the **server's owner key** can call the master.
+>
+> This is a clean, layered **access-control / authorization** model — exactly the kind of "trust boundary" reasoning Omnissa likes. Compare it to RBAC: the master is the privileged service account; tokens trust only it.
+
+### 5.3 Testing with Foundry — [Smart-Contracts/test/Contract.t.sol](Smart-Contracts/test/Contract.t.sol)
+- `test_GetToken`: add token → transfer ownership to master → mint via `GetToken{value:1 ether}` → assert balance.
+- `test_BurnToken`: uses Foundry **cheatcodes** `deal(...)` to fund addresses, mints, then burns and asserts balance returns to 0.
+- **Fuzzing:** `foundry.toml` sets `[profile.ci.fuzz] runs = 10_000` — property-based testing with thousands of random inputs.
+
+> 💡 "I tested the contracts because they handle value and are **immutable once deployed** — you can't hotfix a bug. Fuzzing throws random inputs to find edge cases I wouldn't think of." That sentence alone signals real engineering maturity.
+
+---
+
+## 6. Security deep-dive (Omnissa WILL go here — be the one who raises the issues)
+
+| Area | What you did | What you'd improve |
+| --- | --- | --- |
+| Key generation | `ethers.Wallet.createRandom()` (CSPRNG) | Good. |
+| Key at rest | AES-encrypted in MongoDB | **Random IV per record**; move the master key to a **KMS/HSM**; or go **non-custodial** (never hold keys). |
+| Authorization (chain) | `onlyOwner` on tokens + master; tokens owned by master | Solid layered model; could add per-action roles. |
+| Single point of failure | One **owner private key** controls all mint/burn | Multisig / threshold signing; least-privilege keys. |
+| Atomicity | Buy = pay-then-mint (2 txns) | Make it **one atomic on-chain call** (send ETH with the mint), or refund-on-failure. |
+| Input validation | Regex on amounts | Add bounds, decimals, and **nonce/replay** handling. |
+| Key export | Eject sends plaintext key in chat | Warn user; never for mainnet. |
+| Network | TLS to Telegram/Alchemy/CoinGecko | Add **secrets management** instead of `.env`. |
+| Scope | **Sepolia testnet only** (disclaimer in bot) | Explicitly *not* real money — a deliberate safety choice. |
+
+> **Power line:** "Because I'm custodying private keys with a single symmetric key and a reused IV, the most important hardening is **key management**: random IVs, a KMS, and ideally moving to a **non-custodial** model so a server breach can't drain anyone. For a security company like Omnissa, that's the first conversation I'd want to have about this project."
+
+---
+
+## 7. CS fundamentals this project demonstrates (name them)
+
+- **Cryptography:** symmetric (AES) vs asymmetric (the ECDSA keypair); **encryption at rest**; **digital signatures** (every on-chain txn is signed by the private key); hashing; IV/nonce concepts.
+- **Networking:** **polling vs webhooks**; **JSON-RPC** vs **REST**; request/response over **TLS**; latency and why you **parallelize I/O**.
+- **OS / Concurrency:** single-threaded **event loop**, **non-blocking I/O**, `async/await` (microtask queue), **`Promise.all`** parallelism; an in-memory **state machine**.
+- **Distributed systems:** orchestration across 3 external services; **atomicity / two-phase-commit**; **idempotency**; **single point of failure**; **stateless vs stateful** services (the `userBuyState` problem).
+- **OOP / design:** Solidity **interfaces** (`ITOKEN`), **inheritance** (`ERC20`, `Ownable`), the **owner/access-control** pattern, a **facade/master** contract; TypeScript types/interfaces.
+- **DSA:** hash-map lookups (`Tokens`, `userBuyState`), price arithmetic, parallel vs sequential complexity.
+
+---
+
+## 8. "What I'd do differently" (your ownership story — pick 2–3)
+
+1. **Make buy atomic** — send ETH *with* the mint call so payment + mint succeed or fail together.
+2. **Random IV per encryption** + move the master key to a **KMS**; ideally go **non-custodial**.
+3. **Externalize conversation state** to Redis → stateless, horizontally scalable bot.
+4. **Switch polling → webhooks** for lower latency and better scale once there's a public HTTPS endpoint.
+5. **Cache prices** (CoinGecko has rate limits) with a short TTL instead of calling on every action.
+6. **Fix the real bug** in [getTokenPrice.ts](BOT-Server/src/getTokenPrice.ts): it always reads `response.data['usd-coin']` regardless of the requested token — so non-USDC prices are wrong. (Spotting your own bug is a *huge* credibility signal.)
+7. **Nonce/queue management** so concurrent transactions from the owner key don't collide.
+
+---
+
+## 9. Scalability / system design ("how would this handle 100k users?")
+
+- **Stateless bot** → move `userBuyState` to **Redis**, run **N instances** behind a load balancer; switch to **webhooks** so Telegram pushes updates and any instance can handle them.
+- **Price oracle:** cache CoinGecko responses (Redis, ~10–30s TTL) to avoid rate limits and cut latency.
+- **Blockchain throughput:** the single owner key serializes transactions — add a **signing service** with **nonce management** and a **transaction queue**, or shard across multiple owner keys.
+- **DB:** index on `userId`; it's a simple key-value access pattern, so it scales well and could even be Redis/DynamoDB-style.
+- **Reliability:** make money operations **idempotent + retryable**; record intent before acting so you can recover after a crash (the atomicity story).
+
+---
+
+## 10. TS → Java/OOP bridge (Omnissa is a Java shop)
+
+| This project | Java equivalent (say this) |
+| --- | --- |
+| TypeScript interfaces / types | Java **interfaces / generics** |
+| Solidity `interface ITOKEN` | Java **interface** (contract between classes) |
+| `Ownable` / `onlyOwner` | Spring Security **role check** / `@PreAuthorize` |
+| `async/await`, `Promise.all` | `CompletableFuture` / `allOf(...)` |
+| Mongoose model | Spring Data **Repository** + `@Document`/`@Entity` |
+| `userBuyState` map → Redis | Server-side session / distributed cache |
+| Bot event handlers | Event listeners / message-driven beans |
+
+> "It's TypeScript + Solidity, but it's all OOP: interfaces, inheritance, access control, and async orchestration. The Java/Spring version would be the same architecture — repositories, a signing service, an auth filter, and an interface-based contract layer."
+
+---
+
+## 11. Interview Q&A (20 — say these out loud)
+
+**Q1. Walk me through what happens when a user buys a token.**
+> The bot checks the user has ETH for gas; if not it sends the faucet link. It shows live prices, then asks for an ETH amount via a forced reply and validates it with a regex. It computes `tokens = (1/price) * eth`, decrypts the user's private key, and does two on-chain steps: the **user's wallet sends ETH**, then the **owner's wallet calls the master contract's `GetToken`**, which mints the tokens to the user. The bot replies with the transaction hash.
+
+**Q2. Public key vs private key — explain like I'm new.**
+> The keypair is asymmetric. The **public key/address** is like an account number — safe to share, it's where funds live. The **private key** is the secret that **signs** transactions to authorize spending — anyone with it controls the funds. So the whole security problem is protecting that private key, which is why I encrypt it at rest.
+
+**Q3. How and where do you store private keys, and what are the risks?**
+> Encrypted with **AES** (Node `crypto`) and stored in MongoDB keyed by Telegram chatId. Two risks I'm aware of: I **reuse a single IV**, which is a crypto anti-pattern (identical plaintexts produce identical ciphertext), and it's **symmetric with one master key**, so a breach of that key exposes everyone. I'd use a **random IV per record**, a **KMS/HSM** for the key, and ideally a **non-custodial** design where I never hold keys at all.
+
+**Q4. Symmetric vs asymmetric encryption — where is each used here?**
+> **Asymmetric** (ECDSA) is the wallet itself — sign with the private key, verify with the public key. **Symmetric** (AES) is how I encrypt that private key at rest, because symmetric is fast and I only need to decrypt it server-side. Different jobs: asymmetric for identity/signatures, symmetric for bulk encryption.
+
+**Q5. Your buy is two transactions. What's the failure mode and how do you fix it?**
+> If the user's ETH payment succeeds but the mint reverts, the **user paid and got nothing** — a broken distributed transaction. The clean fix is to make it **one atomic on-chain call**: `GetToken` is `payable`, so send the ETH *with* the mint call — then it's all-or-nothing on chain. Otherwise I'd need **idempotent retries** and **refund-on-failure** logic.
+
+**Q6. Why a master contract that owns all the token contracts?**
+> It's a layered **access-control** design. Each token's `mint`/`burn` is `onlyOwner`, and I **transfer each token's ownership to the master**. So only the master can change supply, and only my server's owner key can call the master. One choke point to enforce policy, and a clear trust boundary — like a privileged service account in RBAC.
+
+**Q7. What is `Promise.all` doing in your balance check, and why does it matter?**
+> I fetch 8 balances (7 tokens + ETH) **in parallel** with `Promise.all` instead of awaiting each in sequence. Sequentially the latency is the **sum** of 8 network round-trips; in parallel it's about the **max** of one. On Node's single thread, overlapping I/O like this is the correct way to speed up I/O-bound work.
+
+**Q8. How does a single-threaded Node server handle many users?**
+> Through the **event loop** and **non-blocking I/O**. While one request waits on the blockchain or DB, Node serves others; when the I/O completes, the callback runs as a microtask. It's ideal for **I/O-bound** work like this. CPU-heavy work would block the loop, so I'd offload that to workers or another service.
+
+**Q9. Polling vs webhooks — which do you use and what's the trade-off?**
+> I use **long-polling** (`node-telegram-bot-api`): the bot repeatedly asks Telegram for updates. It's simple and needs no public HTTPS endpoint, great for development. **Webhooks** are push-based — Telegram POSTs updates to my URL — which is lower-latency and scales better, but needs a public TLS endpoint. For production I'd switch to webhooks.
+
+**Q10. JSON-RPC vs REST — you use both. What's the difference?**
+> **REST** (CoinGecko) is resource-oriented over HTTP verbs/URLs. **JSON-RPC** (Alchemy/Ethereum) is a remote-procedure-call protocol — you POST a method name like `eth_getBalance` with params and get a result. ethers.js wraps the JSON-RPC calls so I work with nice methods instead of raw payloads.
+
+**Q11. How do you keep multi-step conversation state, and what's wrong with it?**
+> An in-memory map `userBuyState[chatId]` acts as a **state machine**: it remembers a user is mid-buy so the next message is read as the amount. The problem: it's **in-memory**, so it's **lost on restart** and **breaks across multiple instances**. I'd move it to **Redis** keyed by chatId, which makes the bot **stateless and horizontally scalable**.
+
+**Q12. Why did you test the smart contracts, and how?**
+> Contracts handle value and are **immutable once deployed** — you can't patch a bug, so testing is non-negotiable. I used **Foundry**: unit tests in Solidity (mint, burn, balance assertions) with cheatcodes like `deal` to fund accounts, plus a **10,000-run fuzz** profile that throws random inputs to surface edge cases.
+
+**Q13. What is fuzz testing and why is it valuable here?**
+> Fuzzing runs a test with **many random inputs** and checks that **properties** always hold (e.g. "balance never goes negative"). It finds edge cases a human wouldn't enumerate — overflow, weird amounts, ordering. For financial contract code, that breadth of coverage is exactly what you want.
+
+**Q14. Why do users need ETH even to use tokens?**
+> Every **state-changing** transaction on Ethereum costs **gas**, paid in ETH, to compensate validators and prevent spam. So even to buy/sell tokens the user needs some ETH for gas — which is why the bot checks the ETH balance first and links the **Sepolia faucet** if it's zero.
+
+**Q15. What's the single biggest security risk in this system?**
+> **Key custody.** I hold every user's private key, encrypted with one symmetric key and a reused IV. A breach of that env key would expose everyone. The right answers are random IVs, a KMS/HSM, least-privilege keys, and ideally a **non-custodial** model so I never hold the secret at all.
+
+**Q16. Is there a bug you know about in the code?**
+> Yes — `getTokenPrice.ts` always reads `response.data['usd-coin']` regardless of which token was requested, so any non-USDC price is wrong. The main flows use a correctly-parameterized version, but that helper is buggy and I'd fix it to index by the actual token id. *(Volunteering this is gold.)*
+
+**Q17. How would you scale this to 100k users?**
+> Make the bot **stateless** (state in Redis), run multiple instances behind a load balancer, and switch to **webhooks**. **Cache prices** to dodge CoinGecko rate limits. On chain, add a **signing service with nonce management and a transaction queue** so the owner key's transactions don't collide. The DB is a simple keyed lookup, so it scales easily with an index on `userId`.
+
+**Q18. ERC-20 — what is it and why use OpenZeppelin?**
+> ERC-20 is the **standard interface** for fungible tokens — `transfer`, `balanceOf`, `approve`, etc. — so wallets/exchanges can treat any token uniformly. I extended **OpenZeppelin's** audited `ERC20` and `Ownable` base contracts instead of writing my own, because security-critical primitives should be battle-tested, not hand-rolled.
+
+**Q19. What's the role of the owner private key, and why is it risky?**
+> It's the server's key that calls the master contract to mint/burn — effectively the system's admin. The risk is it's a **single point of failure**: lose it or leak it and an attacker controls all token supply and the contract's ETH. Mitigations: a **multisig**, threshold signatures, and least-privilege separation.
+
+**Q20. If you rebuilt this for an enterprise like Omnissa, what changes?**
+> **Key management** first: KMS/HSM, random IVs, or non-custodial. **Atomicity**: single on-chain payment+mint, idempotent retries. **Scale**: stateless via Redis, webhooks, price caching, a signing service with nonce control. **Observability**: structured logs, metrics, tracing on every money operation. **CI** running the Foundry tests. And I'd write the server in **Java/Spring** with the same architecture.
+
+---
+
+## 12. One-page cheat sheet (read this last)
+
+- **What:** Telegram bot to buy/sell 7 custom ERC-20 tokens with **Sepolia testnet** ETH. Wallet per user, live prices, on-chain mint/burn.
+- **Stack:** TypeScript + `node-telegram-bot-api` (polling) · **ethers.js** + **Alchemy** (JSON-RPC) · **CoinGecko** REST (prices) · **MongoDB** (encrypted keys) · **Solidity + OpenZeppelin** · **Foundry** tests (10k fuzz).
+- **Wallet:** `/start` → `Wallet.createRandom()` → **AES-encrypt** private key → store `{userId, encPrivKey, publicKey}`.
+- **Buy:** check ETH/gas → price → `tokens=(1/price)*eth` → user sends ETH → owner calls master `GetToken` (mint). **2 txns = atomicity risk** (fix: send ETH *with* the payable mint).
+- **Sell:** check balance → owner calls `BurnToken` (burn + return ETH).
+- **Balances:** **`Promise.all`** → 8 reads in parallel (= max latency, not sum).
+- **Contracts:** 7 ERC-20 (`onlyOwner` mint/burn) all **owned by a master `Tokens_To_Server` (Ownable)** → layered access control / trust boundary.
+- **State:** `userBuyState` in-memory state machine → **should be Redis** (stateless, scalable).
+- **Know-your-weaknesses (say first):** reused **IV** + symmetric **custody** (single point of compromise) · **non-atomic buy** · in-memory state · `getTokenPrice.ts` bug (always reads usd-coin) · polling not webhooks.
+- **Fundamentals to name:** AES vs ECDSA (crypto) · polling vs webhooks, JSON-RPC vs REST (networking) · event loop + `Promise.all` (OS/concurrency) · atomicity/idempotency/SPOF (distributed systems) · interface + Ownable (OOP) · fuzzing (testing).
+- **Java bridge:** TS/Solidity interfaces→Java interfaces · Ownable→@PreAuthorize · Promise.all→CompletableFuture.allOf · Mongoose→Spring Data Repo.
+- **Closing line:** "It's money software across untrusted networks, so I focused on signing, encryption, and testing the contracts; if I productionized it I'd fix key custody, make the buy atomic, and make the bot stateless."
+
+---
+
+*Lead with this project. Raise the security trade-offs before they ask — for Omnissa, that's the strongest signal you can send.* 🚀
