@@ -4,10 +4,11 @@
 
 > ⭐ **This is your strongest project — lead with it.** It hits the exact themes Omnissa cares about: **cryptography & key management, secure client–server communication, distributed/external systems, concurrency, and a contract (interface) between components.** You can go deep, so do.
 
-This guide has 3 parts:
+This guide has 4 parts:
 1. **Deep explanation** of the whole system, framed for an **Omnissa** interviewer.
-2. **20 interview Q&A** — the questions most likely to come from this project.
-3. **A 1-page revision cheat sheet** for the night before.
+2. **§11 — The conversational Q&A you'll ACTUALLY get** (explain it / problem / stack / architecture / challenges). ⭐ *Start here — this is what most project rounds are.*
+3. **§12 — Deep code-level Q&A** (bonus, only if the interviewer goes technical).
+4. **A 1-page revision cheat sheet** for the night before.
 
 ---
 
@@ -230,7 +231,60 @@ This guide has 3 parts:
 
 ---
 
-## 11. Interview Q&A (20 — say these out loud)
+## 11. The questions you'll ACTUALLY get asked (high-level — interviewer hasn't read your code) ⭐
+
+> These are the *real* project questions: explain it, the problem, the stack & why, the architecture, the workflow, and the challenges. The interviewer is testing **how you think and communicate** — they will not read your codebase. Practice these until they flow like a story. **This section matters more than §12.**
+
+**Q1. Tell me about this project / walk me through it.**
+> "It's a Telegram bot that lets anyone trade cryptocurrency right inside a chat. When you message `/start`, the bot **creates an Ethereum wallet for you** behind the scenes and securely stores it. Then through a button menu you can **buy** custom tokens (you pay with test Ethereum and a smart contract issues you the tokens at the live market price), **sell** them back for Ethereum, **check your balances**, or **export your private key** and leave. I built 7 of my own tokens as smart contracts in Solidity, plus a 'master' contract that controls them, and I tested those contracts thoroughly. It runs on a **test network**, so no real money is involved — it's a safe, working demo of how a custodial crypto exchange works end to end." *(Pause for follow-ups.)*
+
+**Q2. What problem does it solve, and why did you build it?**
+> "Using crypto normally has a steep learning curve — you install a wallet, secure a seed phrase, fund it, connect to a decentralized exchange. I wanted to see if I could make buying and selling tokens as easy as **sending a chat message**, with the wallet handled for the user. Honestly, the bigger driver was learning: I wanted to understand how blockchains, wallets, smart contracts, and price feeds actually fit together by building a real transactional system rather than reading about it. The chat interface was the simplest possible front end so I could focus on the hard parts — keys, contracts, and money flow."
+
+**Q3. What's your tech stack, and why did you choose each part?**
+> "The bot server is **TypeScript on Node.js**. I picked **TypeScript** specifically because this is money software — static types catch a whole class of bugs at compile time before they can cause a wrong transaction. I used the **Telegram Bot API** so I didn't have to build a front end at all. **ethers.js** is the library that talks to the blockchain — creating wallets, signing transactions, calling contracts. I used **Alchemy** as my managed Ethereum node so I didn't have to run my own. **CoinGecko's API** gives me live token prices. The smart contracts are **Solidity** built on **OpenZeppelin's** audited token templates, and I tested them with **Foundry**. User data sits in **MongoDB**."
+
+**Q4. Why did you use smart contracts at all? And why your own tokens?**
+> "The smart contracts *are* the product — they're the trustless rules that actually mint tokens when someone pays and burn them when someone sells. I created my own ERC-20 tokens so I had full control to mint and burn for the demo without needing real liquidity. The interesting design decision was a **master contract that owns all 7 token contracts**, so only the master can change token supply, and only my server can call the master — that's a clean, layered permission model, like having one privileged admin service instead of scattering control everywhere."
+
+**Q5. Walk me through the overall architecture.**
+> "Think of the bot server as an **orchestrator** sitting between four systems. The user talks to it through **Telegram**. To do anything financial, it talks to the **Ethereum blockchain** (via Alchemy) to read balances and run transactions through my smart contracts. It calls **CoinGecko** to get live prices so the exchange rate is fair. And it uses **MongoDB** to store each user's wallet — specifically their public address and their **encrypted** private key. So the bot itself holds almost no logic about *value*; the rules live in the smart contracts, and the bot's job is to coordinate the conversation and the calls."
+
+**Q6. Describe the end-to-end workflow — what happens when someone buys a token?**
+> "The user opens the menu and picks Buy. The bot first checks they have some test-Ethereum for transaction fees — if not, it sends them a faucet link to get free test ETH. It shows current prices, then asks how much ETH they want to spend. It calculates how many tokens that buys at the live rate, then runs the transaction: the user's wallet pays the ETH, and the master smart contract mints the tokens to the user's address. The bot replies with the transaction hash, which is the on-chain receipt. Selling is the mirror image — the contract burns the tokens and sends ETH back."
+
+**Q7. What was the most challenging part, and how did you solve it?**
+> "**Safely handling users' private keys.** A private key is the one secret that controls someone's funds — if it leaks, the money's gone. I couldn't store it in plain text, so I learned about encryption and **encrypted every private key before saving it** to the database, decrypting it only in memory when a transaction needs signing. The deeper lesson came afterward: I realized my approach still has weaknesses — I reuse the same encryption initialization vector, and because it's one symmetric key, whoever holds it could decrypt everyone's keys. So I can now explain *why* the gold standard is a dedicated key-management service, or better, a **non-custodial design where you never hold the user's key at all**. Thinking through key custody was the most valuable part of the whole project."
+
+**Q8. Tell me about another challenge — making the bot 'remember' a conversation.**
+> "A bot is **stateless** — each message arrives on its own with no memory of the last one. But buying is a two-step conversation: first you pick a token, then you type an amount. I solved it with a small **state machine** — when you pick 'buy USDC', I record that you're mid-purchase, so your next message is interpreted as the amount, and then I clear that state. It worked, but it taught me a real systems lesson: I kept that state **in memory**, which means it's lost if the server restarts and breaks if I run multiple servers. The proper fix is to keep conversation state in a shared store like Redis so the service can be **stateless and scaled horizontally**."
+
+**Q9. A third challenge — getting the money flow correct.**
+> "The buy is actually two separate steps: the user pays ETH, then my contract mints the tokens. I hit the classic problem — what if the payment goes through but the minting fails? The user would be charged and get nothing. That's a **distributed-transaction / atomicity** problem, and working through it is how I learned about two-phase commit and idempotency. The right fix is to make payment and minting a **single atomic on-chain transaction** so they either both succeed or both fail — my mint function already accepts the payment, so I'd send the ETH together with the mint call."
+
+**Q10. What was hard about the smart contracts specifically?**
+> "Two things. First, **you can't patch them** — once a contract is deployed it's immutable, so a bug is permanent and could cost money. That's why I tested them carefully with Foundry, including **fuzz testing**, which throws thousands of random inputs to find edge cases I'd never think of by hand. Second, **decimal handling** — token amounts on-chain are huge integers (18 decimals), so converting between what the user types and what the contract expects was fiddly and a common source of bugs. Getting unit conversion right taught me to respect how money is represented in code."
+
+**Q11. What would you do differently if you built it again?**
+> "Top of the list is **key management** — random IVs, a proper key-management service, or going fully non-custodial. Then making the buy **atomic**, moving conversation state to **Redis** so the bot scales, switching from polling to **webhooks** for lower latency, and **caching prices** so I don't hammer the price API. And I'd put the smart-contract tests in CI so they run on every change."
+
+**Q12. What did you learn from this project?**
+> "A huge amount about **security and systems thinking** — cryptography, signing, key custody, and what 'atomic' really means when money moves across multiple systems. I also learned to **integrate several external services** that can each fail independently, and to **test code you can't afford to get wrong**. Most of all, I learned to look at my own design and honestly name where it's not secure or won't scale — which is the mindset I think real engineering needs."
+
+**Q13. Did you build it alone, and how long did it take?**
+> *(Answer truthfully — adjust.)* "Yes, solo — which is why I understand every layer, from the Solidity contracts up to the Telegram interface. Building it alone forced me to learn blockchain, backend, and security together instead of just one slice."
+
+**Q14. What are you most proud of?**
+> "That it's a **complete, working transactional system** — real wallets, real on-chain mint/burn, live prices — and that I tested the value-handling parts properly with fuzzing. And that I can give an honest security review of my own project: here's what's solid, here's exactly what I'd harden before it ever touched real money. For a security-focused company, that self-awareness is what I'd want to show."
+
+**Q15. How would you extend it / what's the future scope?**
+> "Make it **non-custodial** so users keep their own keys; support real networks with proper safeguards; add a transaction history and price charts; multi-signature control of the admin key so there's no single point of failure; and a signing service with proper queueing so it scales to many concurrent users. Each of those is a step from 'student demo' toward 'production financial system,' and I can explain the trade-off at every step."
+
+---
+
+## 12. Deep code-level Q&A (bonus — only if the interviewer goes technical)
+
+> Use these if the interviewer digs into implementation. For most rounds, §11 is enough.
 
 **Q1. Walk me through what happens when a user buys a token.**
 > The bot checks the user has ETH for gas; if not it sends the faucet link. It shows live prices, then asks for an ETH amount via a forced reply and validates it with a regex. It computes `tokens = (1/price) * eth`, decrypts the user's private key, and does two on-chain steps: the **user's wallet sends ETH**, then the **owner's wallet calls the master contract's `GetToken`**, which mints the tokens to the user. The bot replies with the transaction hash.
@@ -294,7 +348,7 @@ This guide has 3 parts:
 
 ---
 
-## 12. One-page cheat sheet (read this last)
+## 13. One-page cheat sheet (read this last)
 
 - **What:** Telegram bot to buy/sell 7 custom ERC-20 tokens with **Sepolia testnet** ETH. Wallet per user, live prices, on-chain mint/burn.
 - **Stack:** TypeScript + `node-telegram-bot-api` (polling) · **ethers.js** + **Alchemy** (JSON-RPC) · **CoinGecko** REST (prices) · **MongoDB** (encrypted keys) · **Solidity + OpenZeppelin** · **Foundry** tests (10k fuzz).
